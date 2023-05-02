@@ -3,7 +3,7 @@ use kimchi::bench::BenchmarkCtx;
 
 pub fn bench_proof_creation(c: &mut Criterion) {
     let mut group = c.benchmark_group("Proof creation");
-    group.sample_size(10).sampling_mode(SamplingMode::Flat); // for slow benchmarks
+    group.sample_size(50).sampling_mode(SamplingMode::Flat); // for slow benchmarks
 
     let ctx = BenchmarkCtx::new(10);
     group.bench_function(
