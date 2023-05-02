@@ -10,11 +10,10 @@ use crate::srs::endos;
 use crate::{error::CommitmentError, srs::SRS};
 use ark_ec::{
     models::short_weierstrass_jacobian::GroupAffine as SWJAffine, msm::VariableBaseMSM,
-    AffineCurve, ProjectiveCurve, SWModelParameters,
+    AffineCurve, ProjectiveCurve, SWModelParameters, ModelParameters
 };
-use ark_ff::{
-    BigInteger, Field, FpParameters, One, PrimeField, SquareRootField, UniformRand, Zero,
-};
+use ark_msm::msm::VariableBaseMSM as QuickMSM;
+use ark_ff::{BigInteger, Field, FpParameters, One, PrimeField, SquareRootField, UniformRand, Zero};
 use ark_poly::{
     univariate::DensePolynomial, EvaluationDomain, Evaluations, Radix2EvaluationDomain as D,
 };
@@ -352,7 +351,7 @@ pub fn absorb_commitment<
 /// Unfortunately, we can't specify that `AffineCurve<BaseField : PrimeField>`,
 /// so usage of this traits must manually bind `G::BaseField: PrimeField`.
 pub trait CommitmentCurve: AffineCurve {
-    type Params: SWModelParameters;
+    type Params: SWModelParameters<BaseField = Self::BaseField>;
     type Map: GroupMap<Self::BaseField>;
 
     fn to_coordinates(&self) -> Option<(Self::BaseField, Self::BaseField)>;
@@ -559,6 +558,26 @@ impl<G: CommitmentCurve> SRS<G> {
         })
     }
 
+    fn is_same_type<T: 'static, U: 'static>(&self) -> bool {
+        std::any::TypeId::of::<T>() == std::any::TypeId::of::<U>()
+    }
+
+    fn multi_scalar_mul_helper(
+        &self,
+        points: &[G],
+        scalars: &[<<G as AffineCurve>::ScalarField as PrimeField>::BigInt],
+    ) -> G {
+        if self.is_same_type::<G, SWJAffine<G::Params>>() {
+            let swj_points: &[SWJAffine<G::Params>] = unsafe { std::mem::transmute(points) };
+            let swj_scalars: &[<<G::Params as ModelParameters>::ScalarField as PrimeField>::BigInt] =
+                unsafe { std::mem::transmute(scalars) };
+            let result = QuickMSM::multi_scalar_mul(&swj_points, &swj_scalars).into_affine();
+            return G::of_coordinates(result.x, result.y);
+        } else {
+            return VariableBaseMSM::multi_scalar_mul(&points, &scalars).into_affine();
+        }
+    }
+
     /// This function commits a polynomial using the SRS' basis of size `n`.
     /// - `plnm`: polynomial to commit to with max size of sections
     /// - `max`: maximal degree of the polynomial (not inclusive), if none, no degree bound
@@ -583,8 +602,8 @@ impl<G: CommitmentCurve> SRS<G> {
             unshifted.push(G::zero());
         } else {
             coeffs.chunks(self.g.len()).for_each(|coeffs_chunk| {
-                let chunk = VariableBaseMSM::multi_scalar_mul(&self.g, coeffs_chunk);
-                unshifted.push(chunk.into_affine());
+                let chunk = self.multi_scalar_mul_helper(&self.g, &coeffs_chunk);
+                unshifted.push(chunk);
             });
         }
 
@@ -601,11 +620,11 @@ impl<G: CommitmentCurve> SRS<G> {
                     None
                 } else {
                     // we shift the last chunk to the right as proof of the degree bound
-                    let shifted = VariableBaseMSM::multi_scalar_mul(
+                    let shifted = self.multi_scalar_mul_helper(
                         &self.g[basis_len - (max % basis_len)..],
                         &coeffs[start..],
                     );
-                    Some(shifted.into_affine())
+                    Some(shifted)
                 }
             }
         };
