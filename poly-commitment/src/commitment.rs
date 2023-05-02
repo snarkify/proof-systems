@@ -13,9 +13,7 @@ use ark_ec::{
     AffineCurve, ProjectiveCurve, SWModelParameters, ModelParameters
 };
 use ark_msm::msm::VariableBaseMSM as QuickMSM;
-use ark_ff::{
-    BigInteger, Field, FpParameters, One, PrimeField, SquareRootField, UniformRand, Zero,
-};
+use ark_ff::{BigInteger, Field, FpParameters, One, PrimeField, SquareRootField, UniformRand, Zero};
 use ark_poly::{
     univariate::DensePolynomial, EvaluationDomain, Evaluations, Radix2EvaluationDomain as D,
 };
@@ -353,7 +351,7 @@ pub fn absorb_commitment<
 /// Unfortunately, we can't specify that `AffineCurve<BaseField : PrimeField>`,
 /// so usage of this traits must manually bind `G::BaseField: PrimeField`.
 pub trait CommitmentCurve: AffineCurve {
-    type Params: SWModelParameters;
+    type Params: SWModelParameters<BaseField = Self::BaseField>;
     type Map: GroupMap<Self::BaseField>;
 
     fn to_coordinates(&self) -> Option<(Self::BaseField, Self::BaseField)>;
@@ -560,7 +558,7 @@ impl<G: CommitmentCurve> SRS<G> {
         })
     }
 
-    fn is_same_type<T, U>(&self) -> bool {
+    fn is_same_type<T: 'static, U: 'static>(&self) -> bool {
         std::any::TypeId::of::<T>() == std::any::TypeId::of::<U>()
     }
 
@@ -570,11 +568,11 @@ impl<G: CommitmentCurve> SRS<G> {
         scalars: &[<<G as AffineCurve>::ScalarField as PrimeField>::BigInt],
     ) -> G {
         if self.is_same_type::<G, SWJAffine<G::Params>>() {
-            let swj_points: &[SWJAffine<G::Params>] = unsafe { std::mem::transmute(&points) };
+            let swj_points: &[SWJAffine<G::Params>] = unsafe { std::mem::transmute(points) };
             let swj_scalars: &[<<G::Params as ModelParameters>::ScalarField as PrimeField>::BigInt] =
-                unsafe { std::mem::transmute(&scalars) };
-            let affine_result = QuickMSM::multi_scalar_mul(&swj_points, &swj_scalars).into_affine();
-            return G::of_coordinates(affine_result.x, affine_result.y);
+                unsafe { std::mem::transmute(scalars) };
+            let result = QuickMSM::multi_scalar_mul(&swj_points, &swj_scalars).into_affine();
+            return G::of_coordinates(result.x, result.y);
         } else {
             return VariableBaseMSM::multi_scalar_mul(&points, &scalars).into_affine();
         }
